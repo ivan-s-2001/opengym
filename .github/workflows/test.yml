@@ -37,6 +37,8 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+        working-directory: api
+      - run: npm ci
         working-directory: frontend
       - run: npm test
         working-directory: frontend
@@ -53,8 +55,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      # No dependencies to install: the Coach tests run on node:test and drive the in-repo
-      # fixture provider, so the whole job graph works without an AI account or a network.
+      # Coach adapters now have runtime SDK dependencies; install them before API tests.
+      - run: npm ci
+        working-directory: api
       - run: npm test
         working-directory: api
       # The API's copy of the exercise catalogue is generated and committed. A dataset change

@@ -8,6 +8,7 @@ import { setLang, useLang } from './lib/i18n.js'
 import { setNav } from './lib/nav.js'
 import { useWakeLock } from './lib/wakelock.js'
 import { startFlow } from './sheets.jsx'
+import { MOBILE } from './lib/mobile.js'
 import Icon from './components/Icon.jsx'
 import TabBar from './components/TabBar.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
@@ -78,13 +79,12 @@ function Shell() {
               <Route path="/history" element={<History />} />
               <Route path="/library" element={<Library />} />
               <Route path="/settings" element={<Settings />} />
-              {/* The Coach screens gate themselves on the instance config; the routes exist
-                  unconditionally so a deep link from a notification lands somewhere sane
-                  rather than on the catch-all. */}
-              <Route path="/coach" element={<Coach />} />
-              <Route path="/coach/intake" element={<CoachIntake />} />
-              <Route path="/coach/proposal" element={<CoachProposal />} />
-              <Route path="/admin" element={user?.admin ? <Admin /> : <Navigate to="/home" replace />} />
+              {!MOBILE && <>
+                <Route path="/coach" element={<Coach />} />
+                <Route path="/coach/intake" element={<CoachIntake />} />
+                <Route path="/coach/proposal" element={<CoachProposal />} />
+                <Route path="/admin" element={user?.admin ? <Admin /> : <Navigate to="/home" replace />} />
+              </>}
               <Route path="*" element={<Navigate to="/home" replace />} />
             </Routes>
           )}

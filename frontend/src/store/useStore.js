@@ -2,15 +2,16 @@ import { create } from 'zustand'
 import { api } from '../lib/api.js'
 import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
+import { hasData } from '../lib/state-data.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
-import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
+import { MOBILE, nativeLoad, nativeSave, syncReminder, autoDriveBackup, flushDriveBackup } from '../lib/mobile.js'
 
 const KEY = 'gym_state_v1'
 export const DEF = {
-  unit: 'kg', restSec: 90, sound: true, keepAwake: true, lang: 'en',
+  unit: 'kg', restSec: 90, sound: true, keepAwake: true, lang: 'ru',
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
   bodyweight: [], routines: [], week: {}, dayPlan: {},
-  exWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',
+  exWeights: {}, workouts: [], active: null, customEx: [], exAliases: {}, gifSize: 'full',
   // effort: which per-set effort scale is logged — 'none' | 'rir' | 'rpe'. null, not 'none', so
   // that a profile which never chose (loaded state is overlaid on DEF, on every path: local,
   // server pull, backup import) still falls back to the `showRir` boolean this replaced and
@@ -31,7 +32,6 @@ function loadState() {
   return clone(DEF)
 }
 
-const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
 
 export const useStore = create((set, get) => {
   let pushTm = null
@@ -41,7 +41,12 @@ export const useStore = create((set, get) => {
   // storage eviction) and keep the native reminder schedule in step with the weekly plan.
   const nativePersist = () => {
     clearTimeout(saveTm)
-    saveTm = setTimeout(() => { saveTm = null; nativeSave(get().S); syncReminder(get().S) }, 800)
+    saveTm = setTimeout(() => {
+      saveTm = null
+      nativeSave(get().S)
+      syncReminder(get().S)
+      autoDriveBackup(get().S)
+    }, 800)
   }
 
   const persist = (S, push = true) => {
@@ -62,10 +67,13 @@ export const useStore = create((set, get) => {
   // kills the app.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'hidden') return
-    if (MOBILE && saveTm) {
-      clearTimeout(saveTm)
-      saveTm = null
-      nativeSave(get().S)
+    if (MOBILE) {
+      if (saveTm) {
+        clearTimeout(saveTm)
+        saveTm = null
+        nativeSave(get().S)
+      }
+      flushDriveBackup(get().S).catch(() => {})
     }
     if (pushTm) {
       clearTimeout(pushTm)
