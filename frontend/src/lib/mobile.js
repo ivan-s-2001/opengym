@@ -14,6 +14,131 @@ import { t } from './i18n.js'
 export const MOBILE = import.meta.env.VITE_MOBILE === '1'
 
 const FILE = 'opengym-state.json'
+const DRIVE_PREF_KEY = 'gym_drive_backup_v1'
+const DRIVE_DEBOUNCE_MS = 15000
+const DRIVE_RETRY_MS = 5 * 60 * 1000
+
+let drivePlugin = null
+let driveTimer = null
+let drivePendingState = null
+
+async function googleDrivePlugin() {
+  const { Capacitor, registerPlugin } = await import('@capacitor/core')
+  if (!MOBILE || Capacitor.getPlatform() !== 'android') throw new Error('Google Drive backup is available only in the Android app')
+  if (!drivePlugin) drivePlugin = registerPlugin('GoogleDriveBackup')
+  return drivePlugin
+}
+
+export function getDriveBackupPrefs() {
+  try {
+    return {
+      enabled: false, connected: false, account: null, lastAt: null, lastError: null, retryAfter: 0,
+      ...JSON.parse(localStorage.getItem(DRIVE_PREF_KEY) || '{}'),
+    }
+  } catch (e) {
+    return { enabled: false, connected: false, account: null, lastAt: null, lastError: null, retryAfter: 0 }
+  }
+}
+
+function saveDriveBackupPrefs(patch) {
+  const next = { ...getDriveBackupPrefs(), ...patch }
+  localStorage.setItem(DRIVE_PREF_KEY, JSON.stringify(next))
+  return next
+}
+
+export async function connectDriveBackup(state) {
+  const plugin = await googleDrivePlugin()
+  const auth = await plugin.connect()
+  saveDriveBackupPrefs({
+    enabled: true,
+    connected: true,
+    account: auth.account || null,
+    lastError: null,
+    retryAfter: 0,
+  })
+  if (state) await driveBackupNow(state, { manual: true })
+  return getDriveBackupPrefs()
+}
+
+export async function refreshDriveBackupStatus() {
+  const prefs = getDriveBackupPrefs()
+  if (!prefs.enabled) return prefs
+  try {
+    const plugin = await googleDrivePlugin()
+    const status = await plugin.status()
+    return saveDriveBackupPrefs({ connected: !!status.connected, lastError: status.connected ? null : prefs.lastError })
+  } catch (e) {
+    return saveDriveBackupPrefs({ connected: false })
+  }
+}
+
+export async function disableDriveBackup({ revoke = false } = {}) {
+  drivePendingState = null
+  clearTimeout(driveTimer)
+  driveTimer = null
+  if (revoke) {
+    try { (await googleDrivePlugin()).disconnect() } catch (e) { /* local disable still wins */ }
+  }
+  return saveDriveBackupPrefs({ enabled: false, connected: false, account: revoke ? null : getDriveBackupPrefs().account, retryAfter: 0 })
+}
+
+export async function driveBackupNow(state, { manual = false } = {}) {
+  const prefs = getDriveBackupPrefs()
+  if (!prefs.enabled && !manual) return false
+  if (!manual && prefs.retryAfter && Date.now() < prefs.retryAfter) return false
+  try {
+    const plugin = await googleDrivePlugin()
+    const result = await plugin.backup({ json: JSON.stringify(state) })
+    saveDriveBackupPrefs({
+      enabled: true,
+      connected: true,
+      lastAt: result.savedAt || Date.now(),
+      lastError: null,
+      retryAfter: 0,
+    })
+    return true
+  } catch (e) {
+    saveDriveBackupPrefs({
+      connected: e?.code === 'AUTH_REQUIRED' ? false : prefs.connected,
+      lastError: e?.message || 'Google Drive backup failed',
+      retryAfter: manual ? 0 : Date.now() + DRIVE_RETRY_MS,
+    })
+    if (manual) throw e
+    return false
+  }
+}
+
+export function autoDriveBackup(state) {
+  const prefs = getDriveBackupPrefs()
+  if (!prefs.enabled || (prefs.retryAfter && Date.now() < prefs.retryAfter)) return
+  drivePendingState = state
+  clearTimeout(driveTimer)
+  driveTimer = setTimeout(() => {
+    const latest = drivePendingState
+    drivePendingState = null
+    driveTimer = null
+    if (latest) driveBackupNow(latest).catch(() => {})
+  }, DRIVE_DEBOUNCE_MS)
+}
+
+export async function flushDriveBackup(state) {
+  const prefs = getDriveBackupPrefs()
+  if (!prefs.enabled) return false
+  clearTimeout(driveTimer)
+  driveTimer = null
+  const latest = state || drivePendingState
+  drivePendingState = null
+  return latest ? driveBackupNow(latest) : false
+}
+
+export async function restoreDriveBackup() {
+  const plugin = await googleDrivePlugin()
+  const result = await plugin.restore()
+  return {
+    state: JSON.parse(result.json),
+    modifiedTime: result.modifiedTime || null,
+  }
+}
 
 export async function nativeLoad() {
   try {
