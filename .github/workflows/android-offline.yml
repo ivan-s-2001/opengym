@@ -41,9 +41,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Test Russian catalogue
+      - name: Run offline frontend tests
         working-directory: frontend
-        run: npx vitest run src/lib/ru-exercises.test.js
+        # coach.test.js imports the server-side Anthropic SDK. The offline APK has no Coach/backend.
+        run: npx vitest run --exclude src/lib/coach.test.js
 
       - name: Build fully offline Capacitor bundle
         working-directory: frontend
@@ -58,7 +59,20 @@ jobs:
 
       - name: Build installable debug APK
         working-directory: frontend/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Verify packaged APK has no Internet permission
+        run: |
+          APK='frontend/android/app/build/outputs/apk/debug/app-debug.apk'
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          if [ -z "$AAPT" ]; then
+            echo "aapt not found" >&2
+            exit 1
+          fi
+          if "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
+            echo "INTERNET permission present in packaged APK — offline-only invariant failed" >&2
+            exit 1
+          fi
 
       - name: Rename APK
         run: cp frontend/android/app/build/outputs/apk/debug/app-debug.apk openGym-RU-offline.apk
