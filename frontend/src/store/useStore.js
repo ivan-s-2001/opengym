@@ -4,7 +4,7 @@ import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
 import { hasData } from '../lib/state-data.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
-import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
+import { MOBILE, nativeLoad, nativeSave, syncReminder, autoDriveBackup, flushDriveBackup } from '../lib/mobile.js'
 
 const KEY = 'gym_state_v1'
 export const DEF = {
@@ -41,7 +41,12 @@ export const useStore = create((set, get) => {
   // storage eviction) and keep the native reminder schedule in step with the weekly plan.
   const nativePersist = () => {
     clearTimeout(saveTm)
-    saveTm = setTimeout(() => { saveTm = null; nativeSave(get().S); syncReminder(get().S) }, 800)
+    saveTm = setTimeout(() => {
+      saveTm = null
+      nativeSave(get().S)
+      syncReminder(get().S)
+      autoDriveBackup(get().S)
+    }, 800)
   }
 
   const persist = (S, push = true) => {
@@ -66,6 +71,7 @@ export const useStore = create((set, get) => {
       clearTimeout(saveTm)
       saveTm = null
       nativeSave(get().S)
+      flushDriveBackup(get().S).catch(() => {})
     }
     if (pushTm) {
       clearTimeout(pushTm)
