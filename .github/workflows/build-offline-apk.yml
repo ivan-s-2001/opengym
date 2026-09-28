@@ -1,0 +1,74 @@
+name: Build offline Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ru-exercise-aliases
+    paths:
+      - 'frontend/**'
+      - 'scripts/fetch-mobile-media.sh'
+      - '.github/workflows/build-offline-apk.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Build offline mobile bundle
+        working-directory: frontend
+        run: npm run build:mobile
+
+      - name: Verify Android has no Internet permission
+        run: |
+          if grep -q 'android.permission.INTERNET' frontend/android/app/src/main/AndroidManifest.xml; then
+            echo 'INTERNET permission is present — offline-only invariant failed' >&2
+            exit 1
+          fi
+
+      - name: Build debug APK
+        working-directory: frontend/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp frontend/android/app/build/outputs/apk/debug/app-debug.apk out/openGym-RU-offline-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openGym-RU-offline-apk
+          path: out/openGym-RU-offline-debug.apk
+          if-no-files-found: error
+          retention-days: 14
