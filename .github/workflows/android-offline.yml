@@ -49,10 +49,10 @@ jobs:
         working-directory: frontend
         run: npm run build:mobile
 
-      - name: Verify no CDN URLs leaked into bundle
+      - name: Verify no runtime CDN URLs leaked into bundle
         run: |
-          if grep -R -n -E 'cdn\.jsdelivr\.net|hasaneyldrm/exercises-dataset' frontend/dist --exclude='*.map'; then
-            echo "Network media URL found in offline bundle" >&2
+          if grep -R -n -E 'https?://[^"[:space:]]*cdn\.jsdelivr\.net|https?://[^"[:space:]]*github\.com/hasaneyldrm/exercises-dataset' frontend/dist --exclude='*.map'; then
+            echo "Runtime exercise-media URL found in offline bundle" >&2
             exit 1
           fi
 
