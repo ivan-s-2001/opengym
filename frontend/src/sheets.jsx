@@ -443,6 +443,7 @@ export function deleteCustomEx(ex, afterDelete) {
         // stamp the name into history entries so past workouts stay readable
         s.workouts.forEach(w => w.entries.forEach(e => { if (e.id === ex.id) e.n = ex.n }))
         delete s.exWeights[ex.id]
+        if (s.exAliases) delete s.exAliases[ex.id]
       })
       toast(t('Exercise deleted'))
       afterDelete && afterDelete()
