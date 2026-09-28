@@ -40,9 +40,11 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Run frontend tests
+      - name: Run offline frontend tests
         working-directory: frontend
-        run: npm test
+        # coach.test.js imports the server-side Anthropic SDK from ../api; the offline APK
+        # has no Coach/backend, so that integration suite is intentionally out of this build.
+        run: npx vitest run --exclude src/lib/coach.test.js
 
       - name: Build offline mobile bundle
         working-directory: frontend
