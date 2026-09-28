@@ -1,6 +1,6 @@
 import { EXDB } from './exercises-data.js'
 import { t, getLang } from './i18n.js'
-import { ruNameFor, ruAliasesFor } from './ru-exercises.js'
+import { ruNameFor, ruAliasesFor, hasCuratedRu } from './ru-exercises.js'
 
 export { EXDB }
 export const EXIDX = {}
@@ -93,7 +93,7 @@ export function exerciseSearchScore(ex, query, st) {
   const fields = [
     [exerciseName(ex), 120],
     [ex.custom ? '' : ruNameFor(ex), 115],
-    ...systemAliases(ex).map(v => [v, 105]),
+    ...systemAliases(ex).map(v => [v, hasCuratedRu(ex) ? 112 : 100]),
     ...userAliases(st, ex).map(v => [v, 115]),
     [ex.n, 80],
     [ex.tg, 25],
