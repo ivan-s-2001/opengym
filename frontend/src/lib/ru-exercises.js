@@ -337,3 +337,4 @@ export function ruAliasesFor(ex) {
 export function ruMetaFor(ex) {
   return { name: ruNameFor(ex), aliases: ruAliasesFor(ex) }
 }
+\nexport const hasCuratedRu = ex => !!(ex && CURATED[ex.id])\n
