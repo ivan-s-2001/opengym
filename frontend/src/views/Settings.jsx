@@ -9,7 +9,11 @@ import { pushSupported, enablePush, disablePush, sendTestPush } from '../lib/pus
 import { wakeLockSupported } from '../lib/wakelock.js'
 import { t, LANGS, INSTR_LANGS } from '../lib/i18n.js'
 import { DEMO, REPO } from '../lib/demo.js'
-import { MOBILE, shareExport, syncReminder } from '../lib/mobile.js'
+import {
+  MOBILE, shareExport, syncReminder,
+  getDriveBackupPrefs, connectDriveBackup, refreshDriveBackupStatus,
+  disableDriveBackup, driveBackupNow, restoreDriveBackup,
+} from '../lib/mobile.js'
 import { validBackupState, mergeBackupState } from '../lib/backup.js'
 import { loadStarterPlan, confirmSheet, importFromApp } from '../sheets.jsx'
 import { coachAvailable, hasConsent } from '../lib/coach.js'
@@ -27,6 +31,68 @@ export default function Settings() {
   const fileRef = useRef(null)
   const importRef = useRef(null)
   const wakeOK = wakeLockSupported()
+  const [drivePrefs, setDrivePrefs] = useState(() => MOBILE ? getDriveBackupPrefs() : null)
+
+  useEffect(() => {
+    if (!MOBILE) return
+    refreshDriveBackupStatus().then(setDrivePrefs).catch(() => {})
+  }, [])
+
+  const toggleDriveBackup = async () => {
+    try {
+      if (drivePrefs?.enabled) {
+        setDrivePrefs(await disableDriveBackup())
+        toast(t('Automatic Google Drive backup is off'))
+      } else {
+        setDrivePrefs(await connectDriveBackup(S))
+        toast(t('Google Drive backup connected'))
+      }
+    } catch (e) {
+      toast(t('Google Drive: {0}', e.message || t('connection failed')))
+    }
+  }
+
+  const backupDriveNow = async () => {
+    try {
+      await driveBackupNow(S, { manual: true })
+      setDrivePrefs(getDriveBackupPrefs())
+      toast(t('Backup saved to Google Drive'))
+    } catch (e) {
+      setDrivePrefs(getDriveBackupPrefs())
+      toast(t('Google Drive: {0}', e.message || t('backup failed')))
+    }
+  }
+
+  const restoreDrive = async () => {
+    try {
+      const backup = await restoreDriveBackup()
+      if (!validBackupState(backup.state)) throw new Error('not an openGym backup')
+      const when = backup.modifiedTime ? new Date(backup.modifiedTime).toLocaleString() : ''
+      confirmSheet({
+        title: t('Restore Google Drive backup?'),
+        message: when ? t('This replaces all current data with the Google Drive backup from {0}.', when) : t('This replaces all current data with the Google Drive backup.'),
+        confirmText: t('Restore'),
+        danger: true,
+        onConfirm: () => {
+          replaceState(mergeBackupState(DEF, backup.state), false)
+          toast(t('Google Drive backup restored'))
+        },
+      })
+    } catch (e) {
+      toast(t('Google Drive: {0}', e.message || t('restore failed')))
+    }
+  }
+
+  const disconnectDrive = () => confirmSheet({
+    title: t('Disconnect Google Drive?'),
+    message: t('Automatic backup will stop and openGym will revoke its access to the private backup area in your Google Drive. Local data stays on this phone.'),
+    confirmText: t('Disconnect'),
+    danger: true,
+    onConfirm: async () => {
+      setDrivePrefs(await disableDriveBackup({ revoke: true }))
+      toast(t('Google Drive disconnected'))
+    },
+  })
 
   const doExport = async () => {
     const json = JSON.stringify(S, null, 2)
@@ -184,6 +250,36 @@ export default function Settings() {
         </div>
       </div>
     </Section>
+
+    {MOBILE && (
+      <Section title={t('Google Drive backup')}
+        footer={t('openGym uses only its private appDataFolder. It cannot read your normal Google Drive files.')}>
+        <Row icon="shield" iconTint="var(--blue)"
+          title={t('Automatic backup')}
+          subtitle={drivePrefs?.account
+            ? drivePrefs.account
+            : drivePrefs?.enabled
+              ? t('Connected — changes are backed up automatically')
+              : t('Optional. Your workouts still live locally on this phone.')}>
+          <Switch checked={!!drivePrefs?.enabled} onChange={toggleDriveBackup} />
+        </Row>
+        {drivePrefs?.enabled && <>
+          <Row icon="upload" iconTint="var(--blue)" title={t('Back up now')}
+            subtitle={drivePrefs?.lastAt ? t('Last backup: {0}', new Date(drivePrefs.lastAt).toLocaleString()) : t('No backup yet')}
+            accessory="chevron" onClick={backupDriveNow} />
+          <Row icon="download" iconTint="var(--teal)" title={t('Restore from Google Drive')}
+            subtitle={t('Replaces local data only after confirmation')}
+            accessory="chevron" onClick={restoreDrive} />
+          {drivePrefs?.lastError && (
+            <Row icon="warning" iconTint="var(--orange)" title={t('Last backup did not finish')}
+              subtitle={drivePrefs.lastError} />
+          )}
+          <Row icon="signOut" iconTint="var(--red)" title={t('Disconnect Google Drive')}
+            subtitle={t('Stops backup and revokes openGym access')}
+            danger onClick={disconnectDrive} />
+        </>}
+      </Section>
+    )}
 
     {/* ---------- data: fill it, bring things over, back it up, wipe it ---------- */}
     <Section title={t('Data')}>
