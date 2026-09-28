@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { api } from '../lib/api.js'
 import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
+import { hasData } from '../lib/state-data.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
 
@@ -31,7 +32,6 @@ function loadState() {
   return clone(DEF)
 }
 
-const hasData = st => !!(st?.active || (st?.workouts || []).length || (st?.routines || []).length || (st?.bodyweight || []).length)
 
 export const useStore = create((set, get) => {
   let pushTm = null
