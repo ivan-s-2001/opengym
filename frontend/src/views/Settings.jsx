@@ -271,7 +271,7 @@ export default function Settings() {
             subtitle={t('Replaces local data only after confirmation')}
             accessory="chevron" onClick={restoreDrive} />
           {drivePrefs?.lastError && (
-            <Row icon="warning" iconTint="var(--orange)" title={t('Last backup did not finish')}
+            <Row icon="info" iconTint="var(--orange)" title={t('Last backup did not finish')}
               subtitle={drivePrefs.lastError} />
           )}
           <Row icon="signOut" iconTint="var(--red)" title={t('Disconnect Google Drive')}
