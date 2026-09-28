@@ -92,6 +92,7 @@ export function exerciseSearchScore(ex, query, st) {
 
   const fields = [
     [exerciseName(ex), 120],
+    [ex.custom ? '' : ruNameFor(ex), 115],
     ...systemAliases(ex).map(v => [v, 105]),
     ...userAliases(st, ex).map(v => [v, 115]),
     [ex.n, 80],
