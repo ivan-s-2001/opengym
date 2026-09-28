@@ -31,7 +31,7 @@ function loadState() {
   return clone(DEF)
 }
 
-export const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
+const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
 
 export const useStore = create((set, get) => {
   let pushTm = null
