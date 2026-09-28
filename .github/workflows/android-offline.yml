@@ -1,5 +1,5 @@
 name: Offline Android APK
-# Re-run marker: fully offline RU build
+# Re-run marker: locale blocks repaired
 
 on:
   workflow_dispatch:
