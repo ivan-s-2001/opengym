@@ -50,10 +50,10 @@ jobs:
         working-directory: frontend
         run: npm run build:mobile
 
-      - name: Verify Android has no Internet permission
+      - name: Verify mobile bundle has no exercise CDN
         run: |
-          if grep -q 'android.permission.INTERNET' frontend/android/app/src/main/AndroidManifest.xml; then
-            echo 'INTERNET permission is present — offline-only invariant failed' >&2
+          if grep -R -n 'cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset' frontend/dist; then
+            echo 'Exercise CDN URL leaked into the mobile bundle' >&2
             exit 1
           fi
 
@@ -62,6 +62,19 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
+
+      - name: Verify packaged APK has no Internet permission
+        run: |
+          APK='frontend/android/app/build/outputs/apk/debug/app-debug.apk'
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          if [ -z "$AAPT" ]; then
+            echo 'aapt not found' >&2
+            exit 1
+          fi
+          if "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
+            echo 'INTERNET permission present in packaged APK — offline-only invariant failed' >&2
+            exit 1
+          fi
 
       - name: Collect APK
         run: |
