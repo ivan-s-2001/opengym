@@ -19,4 +19,4 @@ node_modules/
 .codex/
 CLAUDE.md
 AGENTS.md
-graphify-out/
+graphify-out/\n# Offline mobile media — generated at build time\nfrontend/public/img/\nfrontend/public/gif/\n
