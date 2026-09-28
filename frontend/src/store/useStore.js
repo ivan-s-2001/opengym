@@ -67,10 +67,12 @@ export const useStore = create((set, get) => {
   // kills the app.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'hidden') return
-    if (MOBILE && saveTm) {
-      clearTimeout(saveTm)
-      saveTm = null
-      nativeSave(get().S)
+    if (MOBILE) {
+      if (saveTm) {
+        clearTimeout(saveTm)
+        saveTm = null
+        nativeSave(get().S)
+      }
       flushDriveBackup(get().S).catch(() => {})
     }
     if (pushTm) {
