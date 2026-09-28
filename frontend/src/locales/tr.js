@@ -707,4 +707,10 @@ export default {
   '{0}: rep-range floor': '{0}: tekrar aralığı alt sınırı',
   '{0}: reps': '{0}: tekrar',
   '{0}: sets': '{0}: set',
-  "My exercise names": "My exercise names",\n  "Built-in search names": "Built-in search names",\n  "Your search names": "Your search names",\n  "One name per line — for example “my chest machine”": "One name per line — for example “my chest machine”",\n  "These names are private to your profile and are used by exercise search.": "These names are private to your profile and are used by exercise search.",\n  "Exercise aliases saved": "Exercise aliases saved",\n}
+  "My exercise names": "My exercise names",
+  "Built-in search names": "Built-in search names",
+  "Your search names": "Your search names",
+  "One name per line — for example “my chest machine”": "One name per line — for example “my chest machine”",
+  "These names are private to your profile and are used by exercise search.": "These names are private to your profile and are used by exercise search.",
+  "Exercise aliases saved": "Exercise aliases saved",
+}
