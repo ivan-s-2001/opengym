@@ -297,7 +297,6 @@ function ExerciseAliases({ ex, close }) {
         seen.add(key)
         return true
       })
-      .slice(0, 50)
 
     update(s => {
       s.exAliases = s.exAliases || {}
@@ -317,7 +316,7 @@ function ExerciseAliases({ ex, close }) {
       </div>
     </>}
     <div className="muted small" style={{ marginBottom: 8 }}>{t('Your search names')}</div>
-    <textarea className="input" rows={6} maxLength={1500}
+    <textarea className="input" rows={6}
       placeholder={t('One name per line — for example “my chest machine”')}
       value={value} onChange={e => setValue(e.target.value)} />
     <div className="small dim" style={{ marginTop: 7 }}>{t('These names are private to your profile and are used by exercise search.')}</div>
