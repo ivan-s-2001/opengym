@@ -707,4 +707,10 @@ export default {
   '{0}: rep-range floor': '{0}: нижняя граница диапазона повторений',
   '{0}: reps': '{0}: повторения',
   '{0}: sets': '{0}: подходы',
+  'My exercise names': 'Мои названия',
+  'Built-in search names': 'Встроенные названия для поиска',
+  'Your search names': 'Мои названия для поиска',
+  'One name per line — for example “my chest machine”': 'По одному названию на строку — например «мой тренажёр на грудь»',
+  'These names are private to your profile and are used by exercise search.': 'Эти названия хранятся в вашем профиле и используются при поиске упражнений.',
+  'Exercise aliases saved': 'Названия для поиска сохранены',
 }
