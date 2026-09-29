@@ -64,7 +64,7 @@ function EditDaySheet({ iso, schedule, onSave, onClear, close }) {
       value={kind}
       onChange={setKind}
       options={[
-        { value: 'work', label: 'Работа', icon: 'briefcase' },
+        { value: 'work', label: 'Работа', icon: 'clock' },
         { value: 'off', label: 'Выходной', icon: 'moon' },
       ]}
     />
