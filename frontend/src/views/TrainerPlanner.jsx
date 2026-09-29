@@ -1,19 +1,24 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
-import { Button, NumberField, Segmented, TextField } from '../components/ui.jsx'
+import { Button, Row, Section, Segmented, Stepper, TextField } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
+import { effectiveRoutineId } from '../lib/history.js'
 import { fmtDate, isoOf, todayISO, uid } from '../lib/format.js'
 import {
   TRAINER_COLORS,
-  availabilityForTrainerDate,
   confirmTrainerCourse,
   intersectionDates,
   markSession,
-  monthDays,
   normalizePlanner,
-  parseShiftList,
   trainerCoursePlans,
 } from '../lib/trainer-planner.js'
+import {
+  monthDays,
+  normalizeProfileSchedule,
+  scheduleCoverage,
+} from '../lib/work-schedule.js'
+import { trainerSessionStartSheet } from '../sheets.jsx'
 
 const DAYS = [
   { day: 1, label: 'Пн' }, { day: 2, label: 'Вт' }, { day: 3, label: 'Ср' },
@@ -21,306 +26,479 @@ const DAYS = [
   { day: 0, label: 'Вс' },
 ]
 
-const addDays = (iso, days) => {
+const monthLabel = month =>
+  new Date(month + '-01T12:00:00').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
+
+const pluralSessions = n => {
+  const m10 = n % 10, m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return 'занятие'
+  if (m10 >= 2 && m10 <= 4 && !(m100 >= 12 && m100 <= 14)) return 'занятия'
+  return 'занятий'
+}
+
+function addDays(iso, days) {
   const d = new Date(iso + 'T12:00:00')
   d.setDate(d.getDate() + days)
   return isoOf(d)
 }
 
-const monthLabel = month => new Date(month + '-01T12:00:00').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
-
-function usePlanner() {
-  const raw = useStore(s => s.S.trainerPlanner)
+function usePlanningData() {
+  const S = useStore(s => s.S)
   const update = useStore(s => s.update)
-  const planner = normalizePlanner(raw)
-  const setPlanner = next => update(s => { s.trainerPlanner = typeof next === 'function' ? next(normalizePlanner(s.trainerPlanner)) : next })
-  return [planner, setPlanner]
+  const planner = normalizePlanner(S.trainerPlanner)
+  const profileSchedule = normalizeProfileSchedule(S.profileSchedule)
+
+  const blockedSoloDates = useMemo(() => {
+    const set = new Set()
+    const from = todayISO()
+    for (let i = 0; i < 180; i++) {
+      const iso = addDays(from, i)
+      if (effectiveRoutineId(S, iso)) set.add(iso)
+    }
+    return set
+  }, [S.week, S.dayPlan, S.routines])
+
+  const setPlanner = next => update(s => {
+    const current = normalizePlanner(s.trainerPlanner)
+    s.trainerPlanner = typeof next === 'function' ? next(current) : next
+  })
+
+  return { S, planner, profileSchedule, blockedSoloDates, setPlanner }
 }
 
-function SubscriptionSetup({ planner, setPlanner }) {
-  return <div className="tp-hero card">
-    <div className="tp-kicker">Абонемент</div>
-    <div className="tp-title">Сколько занятий нужно отходить?</div>
-    <div className="tp-sub">По этому числу OpenGym построит курс отдельно для каждого тренера.</div>
-    <div className="tp-number-row">
-      <NumberField
-        value={planner.subscriptionSize || ''}
-        decimal={false}
-        inputMode="numeric"
-        aria-label="Количество занятий"
-        onChange={v => setPlanner(p => ({ ...p, subscriptionSize: Math.min(99, Math.max(0, Math.floor(v || 0))) }))}
-      />
-      <span>занятий</span>
+function CourseCalendar({ planner, profileSchedule, trainer, sessions, blockedSoloDates, showIntersections = true }) {
+  const [month, setMonth] = useState(todayISO().slice(0, 7))
+  const dates = monthDays(month)
+  const first = dates[0] ? new Date(dates[0] + 'T12:00:00').getDay() : 1
+  const offset = (first + 6) % 7
+  const cells = [...Array(offset).fill(null), ...dates]
+  const byDate = useMemo(() => Object.fromEntries((sessions || []).map(s => [s.date, s])), [sessions])
+  const possible = useMemo(
+    () => showIntersections ? intersectionDates(planner, profileSchedule, trainer, todayISO(), 180) : new Set(),
+    [planner, profileSchedule, trainer, showIntersections],
+  )
+
+  const shiftMonth = delta => {
+    const d = new Date(month + '-01T12:00:00')
+    d.setMonth(d.getMonth() + delta)
+    setMonth(isoOf(d).slice(0, 7))
+  }
+
+  return <div className="card">
+    <div className="row between" style={{ marginBottom: 4 }}>
+      <button className="iconbtn" onClick={() => shiftMonth(-1)} aria-label="Предыдущий месяц"><Icon name="chevronLeft" /></button>
+      <b className="capitalize">{monthLabel(month)}</b>
+      <button className="iconbtn" onClick={() => shiftMonth(1)} aria-label="Следующий месяц"><Icon name="chevronRight" /></button>
+    </div>
+
+    <div className="cal-grid">
+      {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x => <div className="cal-h" key={x}>{x}</div>)}
+      {cells.map((iso, i) => {
+        if (!iso) return <div key={'e' + i} />
+
+        const session = byDate[iso]
+        const solo = blockedSoloDates.has(iso)
+        const can = possible.has(iso)
+        const attended = session?.status === 'attended'
+        const missed = session?.status === 'missed'
+        const planned = session?.status === 'planned'
+        const color = trainer.color || 'var(--purple)'
+
+        let style
+        if (attended) style = { background: 'color-mix(in srgb,var(--green) 16%,var(--surface))', color: 'var(--green)' }
+        else if (missed) style = { background: 'color-mix(in srgb,var(--red) 14%,var(--surface))', color: 'var(--red)' }
+        else if (planned) style = { background: `color-mix(in srgb,${color} 16%,var(--surface))`, color }
+
+        return <div
+          key={iso}
+          className={'cal-d' + (iso === todayISO() ? ' today' : '')}
+          style={style}
+          title={session ? session.start + '–' + session.end : can ? 'Есть пересечение' : solo ? 'Соло-тренировка' : ''}
+        >
+          <span>{Number(iso.slice(-2))}</span>
+          {session
+            ? <i style={{ background: attended ? 'var(--green)' : missed ? 'var(--red)' : color }} />
+            : can
+              ? <i style={{ background: color }} />
+              : solo
+                ? <i className="plan" />
+                : <i />}
+        </div>
+      })}
+    </div>
+
+    <div className="cal-legend">
+      <span><i style={{ background: trainer.color || 'var(--purple)' }} />С тренером</span>
+      <span><i style={{ background: 'var(--label-3)' }} />Соло</span>
+      <span><i style={{ background: 'var(--green)' }} />Посещено</span>
     </div>
   </div>
 }
 
-function WorkScheduleEditor({ planner, setPlanner }) {
-  const todayMonth = todayISO().slice(0, 7)
-  const [month, setMonth] = useState(todayMonth)
-  const [raw, setRaw] = useState('')
-  const [warnings, setWarnings] = useState([])
-  const dates = monthDays(month)
-  const entered = dates.filter(d => Object.prototype.hasOwnProperty.call(planner.workShifts, d)).length
-  const work = dates.filter(d => planner.workShifts[d]).length
+function PlanningTab({ planner, profileSchedule, blockedSoloDates, setPlanner, onOpenTrainers }) {
+  const nav = useNavigate()
+  const plans = useMemo(
+    () => trainerCoursePlans(planner, profileSchedule, todayISO(), blockedSoloDates),
+    [planner, profileSchedule, blockedSoloDates],
+  )
+  const [selectedId, setSelectedId] = useState(null)
+  const selected = plans.find(x => x.trainer.id === selectedId) || plans[0]
+  const coverage = scheduleCoverage(profileSchedule, todayISO(), 120)
 
-  const importList = () => {
-    const parsed = parseShiftList(raw, month)
-    setWarnings(parsed.warnings)
-    setPlanner(p => ({ ...p, workShifts: { ...p.workShifts, ...parsed.shifts } }))
+  if (planner.confirmedTrainerId) {
+    return <ActiveCourse
+      planner={planner}
+      profileSchedule={profileSchedule}
+      blockedSoloDates={blockedSoloDates}
+      setPlanner={setPlanner}
+    />
   }
 
-  return <section className="tp-section">
-    <div className="tp-section-head">
-      <div>
-        <h3>Мой график</h3>
-        <p>{entered ? `${entered} дней заполнено · ${work} рабочих` : 'Нужен для расчёта пересечений'}</p>
+  return <>
+    <Section title="Абонемент" footer="План строится только от сегодняшнего дня вперёд.">
+      <div className="lrow">
+        <span className="lrow-i" style={{ '--tint': 'var(--acc)' }}><Icon name="clipboard" /></span>
+        <span className="lrow-m">
+          <span className="lrow-t">Количество занятий</span>
+          <span className="lrow-s">Сколько тренировок нужно посетить у одного тренера</span>
+        </span>
+        <Stepper
+          value={planner.subscriptionSize || 0}
+          decimal={false}
+          onChange={v => setPlanner(p => ({ ...p, subscriptionSize: Math.min(99, Math.max(0, Math.round(v || 0))) }))}
+        />
       </div>
-      <input className="tp-month" type="month" value={month} min={todayMonth} onChange={e => setMonth(e.target.value)} />
-    </div>
+    </Section>
 
-    <div className="card tp-work-card">
-      <div className="tp-mini-cal">
-        {dates.map(iso => {
-          const known = Object.prototype.hasOwnProperty.call(planner.workShifts, iso)
-          const shift = planner.workShifts[iso]
-          return <div key={iso} className={'tp-mini-day' + (shift ? ' work' : known ? ' off' : '')}>
-            <span>{Number(iso.slice(-2))}</span>
-            <i>{shift ? shift.start.replace(':00', '') : known ? 'вых' : '—'}</i>
-          </div>
-        })}
-      </div>
-      <textarea
-        className="field area tp-shift-import"
-        value={raw}
-        onChange={e => setRaw(e.target.value)}
-        placeholder={'08:00–17:00\n08:00–17:00\n-\n15:00–00:00\n…'}
+    <Section title="Для расчёта">
+      <Row
+        icon="calendar"
+        iconTint="var(--blue)"
+        title="Мой график"
+        subtitle={coverage.known ? `Известно ${coverage.known} будущих дней` : 'Рабочие смены ещё не заполнены'}
+        value={coverage.known ? 'Готов' : 'Нужно заполнить'}
+        accessory="chevron"
+        onClick={() => nav('/settings/schedule')}
       />
-      <div className="tp-hint">Одна строка = один день выбранного месяца. «-» = выходной.</div>
-      {warnings.map((w, i) => <div className="tp-warning" key={i}>{w}</div>)}
-      <Button variant="tinted" icon="clipboard" onClick={importList}>Загрузить график месяца</Button>
-    </div>
-  </section>
+      <Row
+        icon="person"
+        iconTint="var(--purple)"
+        title="Тренеры"
+        subtitle="Расписание каждого тренера считается отдельно"
+        value={planner.trainers.length}
+        accessory="chevron"
+        onClick={onOpenTrainers}
+      />
+    </Section>
+
+    {!planner.subscriptionSize ? (
+      <div className="empty">
+        <div className="ico"><Icon name="clipboard" /></div>
+        Укажи размер абонемента — после этого появятся варианты расписания.
+      </div>
+    ) : !coverage.known ? (
+      <div className="empty">
+        <div className="ico"><Icon name="calendar" /></div>
+        Сначала заполни личный график в профиле.
+        <div style={{ height: 12 }} />
+        <Button variant="primary" onClick={() => nav('/settings/schedule')}>Открыть мой график</Button>
+      </div>
+    ) : !planner.trainers.length ? (
+      <div className="empty">
+        <div className="ico"><Icon name="person" /></div>
+        Добавь тренеров и их недельное расписание.
+        <div style={{ height: 12 }} />
+        <Button variant="primary" onClick={onOpenTrainers}>Добавить тренера</Button>
+      </div>
+    ) : !plans.length ? (
+      <div className="empty">Ни у одного тренера пока нет расписания.</div>
+    ) : <>
+      <h4 className="sec">Сравнение</h4>
+      <div className="chips" style={{ marginBottom: 10, overflowX: 'auto', flexWrap: 'nowrap' }}>
+        {plans.map((plan, index) => <button
+          key={plan.trainer.id}
+          className={'chip nocap' + (selected?.trainer.id === plan.trainer.id ? ' on' : '')}
+          onClick={() => setSelectedId(plan.trainer.id)}
+          style={{ flex: '0 0 auto' }}
+        >
+          <span style={{ color: plan.trainer.color || 'var(--purple)' }}>●</span>
+          {plan.trainer.name || 'Тренер'} · {plan.sessions.length}/{plan.target}
+          {index === 0 ? ' · рекомендуем' : ''}
+        </button>)}
+      </div>
+
+      {selected && <>
+        <div className="card">
+          <div className="row between">
+            <div>
+              <div className="row" style={{ gap: 7 }}>
+                <span style={{ color: selected.trainer.color || 'var(--purple)' }}>●</span>
+                <div className="big" style={{ fontSize: 22 }}>{selected.trainer.name || 'Тренер'}</div>
+              </div>
+              <div className="muted small" style={{ marginTop: 3 }}>
+                {selected.complete
+                  ? `Все ${selected.target} ${pluralSessions(selected.target)} помещаются в график`
+                  : `Найдено ${selected.sessions.length} из ${selected.target}`}
+              </div>
+            </div>
+            {selected === plans[0] && <span className="tag acc">Рекомендуем</span>}
+          </div>
+
+          <div className="tiles" style={{ marginTop: 14, marginBottom: 0 }}>
+            <div className="tile">
+              <div className="l">Занятий</div>
+              <div className="v">{selected.sessions.length}/{selected.target}</div>
+            </div>
+            <div className="tile">
+              <div className="l">Последнее</div>
+              <div className="v" style={{ fontSize: 18 }}>{selected.finishDate ? fmtDate(selected.finishDate) : '—'}</div>
+            </div>
+          </div>
+
+          {!selected.complete && coverage.known < 90 && <div className="small" style={{ color: 'var(--orange)', marginTop: 12 }}>
+            Возможно, не хватает будущего рабочего графика. Добавь следующие месяцы в профиле.
+          </div>}
+        </div>
+
+        <CourseCalendar
+          planner={planner}
+          profileSchedule={profileSchedule}
+          trainer={selected.trainer}
+          sessions={selected.sessions}
+          blockedSoloDates={blockedSoloDates}
+        />
+
+        <Button
+          variant="primary"
+          icon="check"
+          disabled={!selected.complete}
+          onClick={() => setPlanner(confirmTrainerCourse(
+            planner,
+            profileSchedule,
+            selected.trainer.id,
+            todayISO(),
+            blockedSoloDates,
+          ))}
+        >
+          Выбрать {selected.trainer.name || 'тренера'}
+        </Button>
+      </>}
+    </>}
+  </>
 }
 
-function TrainerEditor({ trainer, index, onChange, onDelete }) {
-  const [openDay, setOpenDay] = useState(1)
-  const slots = (trainer.slots || []).filter(s => Number(s.day) === openDay).sort((a, b) => a.start.localeCompare(b.start))
+function TrainerEditor({ planner, trainer, setPlanner }) {
+  const [day, setDay] = useState(1)
+  const slots = (trainer.slots || []).filter(x => Number(x.day) === day).sort((a, b) => a.start.localeCompare(b.start))
 
-  const replaceSlot = (slot, patch) => {
-    onChange({
+  const changeTrainer = next => setPlanner(p => ({
+    ...p,
+    trainers: p.trainers.map(t => t.id === next.id ? next : t),
+  }))
+
+  const replaceSlot = (slot, patch) =>
+    changeTrainer({
       ...trainer,
       slots: trainer.slots.map(s => s.id === slot.id ? { ...s, ...patch } : s),
     })
-  }
 
   const addSlot = () => {
     const last = slots.at(-1)
-    onChange({
+    changeTrainer({
       ...trainer,
       slots: [...trainer.slots, {
         id: uid(),
-        day: openDay,
+        day,
         start: last?.end || '17:00',
-        end: last ? '21:00' : '20:00',
+        end: '20:00',
       }],
     })
   }
 
-  return <div className="card tp-trainer-edit">
-    <div className="tp-trainer-top">
-      <span className="tp-avatar" style={{ '--trainer': trainer.color }}><Icon name="person" /></span>
-      <TextField value={trainer.name} onChange={e => onChange({ ...trainer, name: e.target.value })} placeholder={'Тренер ' + (index + 1)} />
-      <button className="iconbtn" onClick={onDelete} aria-label="Удалить тренера"><Icon name="trash" /></button>
-    </div>
+  return <>
+    <Section title="Тренер">
+      <div className="lrow">
+        <span className="lrow-i" style={{ '--tint': trainer.color || 'var(--purple)' }}><Icon name="person" /></span>
+        <span className="lrow-m"><span className="lrow-t">Имя</span></span>
+        <TextField
+          value={trainer.name}
+          onChange={e => changeTrainer({ ...trainer, name: e.target.value })}
+          placeholder="Имя тренера"
+          style={{ width: 150 }}
+        />
+      </div>
+      <div className="lrow" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <span className="lrow-t">Цвет в расписании</span>
+        <div className="row" style={{ flexWrap: 'wrap', gap: 4 }}>
+          {TRAINER_COLORS.map(color => <button
+            key={color}
+            onClick={() => changeTrainer({ ...trainer, color })}
+            aria-label={'Выбрать цвет ' + color}
+            style={{ width: 48, height: 48, display: 'grid', placeItems: 'center' }}
+          >
+            <span className={'swatch' + ((trainer.color || TRAINER_COLORS[0]) === color ? ' on' : '')} style={{ background: color }} />
+          </button>)}
+        </div>
+      </div>
+    </Section>
 
-    <div className="tp-swatches">
-      {TRAINER_COLORS.map(color => <button
-        key={color}
-        className={'tp-swatch' + (trainer.color === color ? ' on' : '')}
-        style={{ '--trainer': color }}
-        onClick={() => onChange({ ...trainer, color })}
-        aria-label={'Цвет ' + color}
-      />)}
-    </div>
-
-    <div className="tp-week-tabs">
-      {DAYS.map(d => {
-        const active = trainer.slots.some(s => Number(s.day) === d.day)
-        return <button key={d.day} className={(openDay === d.day ? 'on' : '') + (active ? ' active' : '')} onClick={() => setOpenDay(d.day)}>
-          {d.label}
-        </button>
-      })}
-    </div>
-
-    <div className="tp-slot-list">
-      {slots.map(slot => <div className="tp-slot" key={slot.id}>
-        <input type="time" value={slot.start} onChange={e => replaceSlot(slot, { start: e.target.value })} />
-        <span>—</span>
-        <input type="time" value={slot.end} onChange={e => replaceSlot(slot, { end: e.target.value })} />
-        <button onClick={() => onChange({ ...trainer, slots: trainer.slots.filter(s => s.id !== slot.id) })}><Icon name="xmark" /></button>
-      </div>)}
-      <Button size="sm" variant="tinted" icon="plus" onClick={addSlot}>Добавить время</Button>
-    </div>
-  </div>
-}
-
-function TrainersEditor({ planner, setPlanner }) {
-  const addTrainer = () => {
-    const i = planner.trainers.length
-    const trainer = { id: uid(), name: '', color: TRAINER_COLORS[i % TRAINER_COLORS.length], slots: [] }
-    setPlanner(p => ({ ...p, trainers: [...p.trainers, trainer] }))
-  }
-
-  return <section className="tp-section">
-    <div className="tp-section-head">
-      <div><h3>Тренеры</h3><p>Добавь весь пул — OpenGym сравнит каждого</p></div>
-      <Button size="sm" variant="tinted" icon="plus" onClick={addTrainer}>Добавить</Button>
-    </div>
-    <div className="tp-stack">
-      {planner.trainers.map((trainer, index) => <TrainerEditor
-        key={trainer.id}
-        trainer={trainer}
-        index={index}
-        onChange={next => setPlanner(p => ({ ...p, trainers: p.trainers.map(t => t.id === next.id ? next : t) }))}
-        onDelete={() => setPlanner(p => ({ ...p, trainers: p.trainers.filter(t => t.id !== trainer.id) }))}
-      />)}
-      {!planner.trainers.length && <div className="empty">Добавь хотя бы одного тренера и его недельный график.</div>}
-    </div>
-  </section>
-}
-
-function PlannerCalendar({ planner, trainer, course, month, setMonth, activeSessionId, onSession }) {
-  const dates = monthDays(month)
-  const first = dates[0] ? new Date(dates[0] + 'T12:00:00').getDay() : 1
-  const mondayOffset = (first + 6) % 7
-  const cells = [...Array(mondayOffset).fill(null), ...dates]
-  const intersection = useMemo(() => intersectionDates(planner, trainer, todayISO(), 180), [planner, trainer])
-  const sessionsByDate = useMemo(() => Object.fromEntries(course.sessions.map(s => [s.date, s])), [course.sessions])
-
-  const shiftMonth = n => {
-    const d = new Date(month + '-01T12:00:00')
-    d.setMonth(d.getMonth() + n)
-    setMonth(isoOf(d).slice(0, 7))
-  }
-
-  return <div className="tp-calendar card">
-    <div className="tp-cal-head">
-      <button className="iconbtn" onClick={() => shiftMonth(-1)}><Icon name="chevronLeft" /></button>
-      <strong>{monthLabel(month)}</strong>
-      <button className="iconbtn" onClick={() => shiftMonth(1)}><Icon name="chevronRight" /></button>
-    </div>
-    <div className="tp-cal-week">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x => <span key={x}>{x}</span>)}</div>
-    <div className="tp-cal-grid">
-      {cells.map((iso, i) => {
-        if (!iso) return <span className="tp-cal-empty" key={'e' + i} />
-        const session = sessionsByDate[iso]
-        const possible = intersection.has(iso)
-        const past = iso < todayISO()
-        const status = session?.status
-        return <button
-          key={iso}
-          className={'tp-cal-day' + (session ? ' session' : '') + (possible ? ' possible' : '') + (activeSessionId === session?.id ? ' selected' : '') + (past ? ' past' : '') + (status ? ' ' + status : '')}
-          style={{ '--trainer': trainer.color }}
-          onClick={() => session && onSession?.(session)}
-        >
-          <span>{Number(iso.slice(-2))}</span>
-          {session ? <i>{session.start}</i> : possible ? <b /> : null}
-        </button>
-      })}
-    </div>
-    <div className="tp-cal-legend">
-      <span><i style={{ '--trainer': trainer.color }} />в плане</span>
-      <span><b style={{ '--trainer': trainer.color }} />есть пересечение</span>
-    </div>
-  </div>
-}
-
-function CourseComparison({ planner, setPlanner }) {
-  const plans = useMemo(() => trainerCoursePlans(planner, todayISO()), [planner])
-  const [selectedId, setSelectedId] = useState(null)
-  const selected = plans.find(p => p.trainer.id === selectedId) || plans[0]
-  const [month, setMonth] = useState(todayISO().slice(0, 7))
-
-  if (!planner.subscriptionSize) return <div className="empty">Сначала укажи размер абонемента.</div>
-  if (!planner.trainers.length) return null
-  if (!plans.length) return <div className="empty">Добавь расписание хотя бы одному тренеру.</div>
-
-  return <section className="tp-section">
-    <div className="tp-section-head"><div><h3>Лучший курс</h3><p>Все даты считаются от сегодня. Прошлые не участвуют.</p></div></div>
-
-    <div className="tp-trainer-switch">
-      {plans.map((plan, i) => <button
-        key={plan.trainer.id}
-        className={selected?.trainer.id === plan.trainer.id ? 'on' : ''}
-        style={{ '--trainer': plan.trainer.color }}
-        onClick={() => setSelectedId(plan.trainer.id)}
+    <h4 className="sec">Расписание</h4>
+    <div className="chips" style={{ marginBottom: 10 }}>
+      {DAYS.map(d => <button
+        key={d.day}
+        className={'chip' + (day === d.day ? ' on' : '')}
+        onClick={() => setDay(d.day)}
       >
-        <span className="tp-dot" />
-        <span><strong>{plan.trainer.name || 'Тренер'}</strong><small>{plan.sessions.length}/{plan.target} занятий</small></span>
-        {i === 0 && <em>лучший</em>}
+        {d.label}
+        {trainer.slots.some(s => Number(s.day) === d.day) ? ' •' : ''}
       </button>)}
     </div>
 
-    {selected && <>
-      <div className="tp-course-summary card">
-        <div>
-          <span className="tp-avatar" style={{ '--trainer': selected.trainer.color }}><Icon name="person" /></span>
-          <div><strong>{selected.trainer.name || 'Тренер'}</strong><small>{selected.complete ? 'Абонемент помещается в график' : 'Не хватает будущего графика'}</small></div>
+    <div className="sect-b">
+      {slots.map(slot => <div className="lrow" key={slot.id}>
+        <span className="lrow-i" style={{ '--tint': trainer.color || 'var(--purple)' }}><Icon name="clock" /></span>
+        <span className="lrow-m">
+          <span className="lrow-t">Интервал</span>
+        </span>
+        <div className="row" style={{ gap: 6 }}>
+          <TextField type="time" value={slot.start} onChange={e => replaceSlot(slot, { start: e.target.value })} style={{ width: 92 }} />
+          <span className="muted">—</span>
+          <TextField type="time" value={slot.end} onChange={e => replaceSlot(slot, { end: e.target.value })} style={{ width: 92 }} />
+          <button
+            className="iconbtn"
+            onClick={() => changeTrainer({ ...trainer, slots: trainer.slots.filter(s => s.id !== slot.id) })}
+            aria-label="Удалить интервал"
+            style={{ color: 'var(--red)' }}
+          ><Icon name="trash" /></button>
         </div>
-        <div className="tp-metrics">
-          <span><strong>{selected.sessions.length}</strong><small>занятий</small></span>
-          <span><strong>{selected.finishDate ? fmtDate(selected.finishDate) : '—'}</strong><small>последнее</small></span>
-          <span><strong>{selected.penalty === 0 ? 'ровно' : '+' + selected.penalty}</strong><small>ритм</small></span>
-        </div>
-      </div>
+      </div>)}
+      {!slots.length && <div className="empty" style={{ padding: 24 }}>В этот день тренер не работает.</div>}
+    </div>
 
-      <PlannerCalendar planner={planner} trainer={selected.trainer} course={selected} month={month} setMonth={setMonth} />
+    <div style={{ height: 10 }} />
+    <Button variant="tinted" icon="plus" onClick={addSlot}>Добавить время</Button>
 
+    {planner.confirmedTrainerId !== trainer.id && <>
+      <div style={{ height: 8 }} />
       <Button
-        variant="primary"
-        icon="check"
-        disabled={!selected.complete}
-        onClick={() => setPlanner(confirmTrainerCourse(planner, selected.trainer.id, todayISO()))}
+        variant="ghost"
+        style={{ color: 'var(--red)' }}
+        onClick={() => setPlanner(p => ({
+          ...p,
+          trainers: p.trainers.filter(t => t.id !== trainer.id),
+        }))}
       >
-        Выбрать {selected.trainer.name || 'тренера'} для абонемента
+        Удалить тренера
       </Button>
     </>}
-  </section>
+  </>
 }
 
-function ActiveCourse({ planner, setPlanner }) {
-  const trainer = planner.trainers.find(t => t.id === planner.confirmedTrainerId)
-  const [view, setView] = useState('calendar')
-  const [month, setMonth] = useState(todayISO().slice(0, 7))
-  const [selectedSession, setSelectedSession] = useState(null)
-  if (!trainer) return null
+function TrainersTab({ planner, setPlanner }) {
+  const [selectedId, setSelectedId] = useState(planner.trainers[0]?.id || null)
+  const selected = planner.trainers.find(t => t.id === selectedId) || planner.trainers[0] || null
 
-  const attended = planner.sessions.filter(s => s.status === 'attended').length
-  const missed = planner.sessions.filter(s => s.status === 'missed').length
-  const planned = planner.sessions.filter(s => s.status === 'planned')
-  const done = attended >= planner.subscriptionSize
-  const course = { trainer, sessions: planner.sessions, target: planner.subscriptionSize }
-
-  const setStatus = (session, status) => {
-    const next = markSession(planner, session.id, status, todayISO())
-    setPlanner(next)
-    setSelectedSession(null)
+  const addTrainer = () => {
+    const trainer = {
+      id: uid(),
+      name: '',
+      color: TRAINER_COLORS[planner.trainers.length % TRAINER_COLORS.length],
+      slots: [],
+    }
+    setSelectedId(trainer.id)
+    setPlanner(p => ({ ...p, trainers: [...p.trainers, trainer] }))
   }
 
   return <>
-    <div className="tp-progress card">
-      <div className="tp-progress-head">
-        <span className="tp-avatar" style={{ '--trainer': trainer.color }}><Icon name="person" /></span>
-        <div><div className="tp-kicker">{done ? 'Абонемент завершён' : 'Активный абонемент'}</div><div className="tp-title">{trainer.name || 'Тренер'}</div></div>
-        <strong>{attended}/{planner.subscriptionSize}</strong>
+    <div className="row between" style={{ marginBottom: 10 }}>
+      <div>
+        <div className="big" style={{ fontSize: 22 }}>Тренеры</div>
+        <div className="muted small">Универсальные тренеры и их рабочее время</div>
       </div>
-      <div className="tp-progress-track"><i style={{ width: Math.min(100, attended / Math.max(1, planner.subscriptionSize) * 100) + '%', '--trainer': trainer.color }} /></div>
-      <div className="tp-progress-meta">{planned.length} впереди · {missed} пропущено · засчитываются только посещённые</div>
+      <Button size="sm" variant="tinted" icon="plus" onClick={addTrainer}>Добавить</Button>
+    </div>
+
+    {!!planner.trainers.length && <div className="chips" style={{ marginBottom: 12, overflowX: 'auto', flexWrap: 'nowrap' }}>
+      {planner.trainers.map(trainer => <button
+        key={trainer.id}
+        className={'chip nocap' + (selected?.id === trainer.id ? ' on' : '')}
+        onClick={() => setSelectedId(trainer.id)}
+        style={{ flex: '0 0 auto' }}
+      >
+        <span style={{ color: trainer.color || 'var(--purple)' }}>●</span>
+        {trainer.name || 'Без имени'}
+      </button>)}
+    </div>}
+
+    {selected
+      ? <TrainerEditor planner={planner} trainer={selected} setPlanner={setPlanner} />
+      : <div className="empty">
+          <div className="ico"><Icon name="person" /></div>
+          Добавь первого тренера.
+          <div style={{ height: 12 }} />
+          <Button variant="primary" icon="plus" onClick={addTrainer}>Добавить тренера</Button>
+        </div>}
+  </>
+}
+
+function ActiveCourse({ planner, profileSchedule, blockedSoloDates, setPlanner }) {
+  const trainer = planner.trainers.find(t => t.id === planner.confirmedTrainerId)
+  const [view, setView] = useState('calendar')
+  if (!trainer) return <div className="empty">Выбранный тренер больше не найден.</div>
+
+  const attended = planner.sessions.filter(s => s.status === 'attended').length
+  const missed = planner.sessions.filter(s => s.status === 'missed').length
+  const remaining = Math.max(0, planner.subscriptionSize - attended)
+  const todaySession = planner.sessions.find(s => s.date === todayISO() && s.status === 'planned')
+
+  const setStatus = (session, status) => setPlanner(markSession(
+    planner,
+    profileSchedule,
+    session.id,
+    status,
+    todayISO(),
+    blockedSoloDates,
+  ))
+
+  return <>
+    <div className="card">
+      <div className="row between">
+        <div className="row" style={{ gap: 10 }}>
+          <span className="lrow-i" style={{ '--tint': trainer.color || 'var(--purple)' }}><Icon name="person" /></span>
+          <div>
+            <div className="muted small">{remaining ? 'Активный абонемент' : 'Абонемент завершён'}</div>
+            <div className="big" style={{ fontSize: 22 }}>{trainer.name || 'Тренер'}</div>
+          </div>
+        </div>
+        <div className="stat-v">{attended}/{planner.subscriptionSize}</div>
+      </div>
+
+      <div style={{ height: 8, borderRadius: 99, background: 'var(--surface-2)', overflow: 'hidden', marginTop: 14 }}>
+        <div style={{
+          height: '100%',
+          width: Math.min(100, attended / Math.max(1, planner.subscriptionSize) * 100) + '%',
+          background: trainer.color || 'var(--purple)',
+          borderRadius: 99,
+        }} />
+      </div>
+
+      <div className="muted small" style={{ marginTop: 8 }}>
+        {remaining} осталось · {missed} пропущено
+      </div>
+
+      {todaySession && <>
+        <div style={{ height: 12 }} />
+        <Button
+          variant="primary"
+          icon="play"
+          onClick={() => trainerSessionStartSheet(todaySession.id)}
+        >
+          Начать сегодняшнюю тренировку · {todaySession.start}
+        </Button>
+      </>}
     </div>
 
     <Segmented
-      className="tp-view-seg"
       value={view}
       onChange={setView}
       options={[
@@ -330,37 +508,83 @@ function ActiveCourse({ planner, setPlanner }) {
     />
 
     {view === 'calendar'
-      ? <PlannerCalendar planner={planner} trainer={trainer} course={course} month={month} setMonth={setMonth} activeSessionId={selectedSession?.id} onSession={setSelectedSession} />
-      : <div className="tp-session-list">
-        {[...planner.sessions].sort((a,b) => a.date.localeCompare(b.date)).map((s, i) => <div className={'card tp-session ' + s.status} key={s.id}>
-          <div className="tp-session-num">{s.status === 'attended' ? <Icon name="check" /> : s.status === 'missed' ? <Icon name="xmark" /> : i + 1}</div>
-          <div className="grow"><strong>{fmtDate(s.date, true)}</strong><small>{s.start}–{s.end}</small></div>
-          <span className={'tag ' + (s.status === 'attended' ? 'acc' : '')}>{s.status === 'attended' ? 'Был' : s.status === 'missed' ? 'Пропустил' : 'Запланировано'}</span>
-          {s.status === 'planned' && s.date <= todayISO() && <button className="iconbtn" onClick={() => setSelectedSession(s)}><Icon name="chevronRight" /></button>}
-        </div>)}
-      </div>}
+      ? <CourseCalendar
+          planner={planner}
+          profileSchedule={profileSchedule}
+          trainer={trainer}
+          sessions={planner.sessions}
+          blockedSoloDates={blockedSoloDates}
+          showIntersections={false}
+        />
+      : <div className="list">
+          {[...planner.sessions]
+            .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
+            .map(session => {
+              const canMark = session.status === 'planned' && session.date <= todayISO()
+              const subtitle = session.start + '–' + session.end + ' · ' +
+                (session.status === 'attended' ? 'посещено' : session.status === 'missed' ? 'пропущено' : 'запланировано')
 
-    {selectedSession && <div className="tp-action card">
-      <div><strong>{fmtDate(selectedSession.date, true)} · {selectedSession.start}</strong><small>Отметь результат. Пропуск не уменьшает остаток абонемента.</small></div>
-      <div className="grid2">
-        <Button variant="primary" icon="check" onClick={() => setStatus(selectedSession, 'attended')}>Ходил</Button>
-        <Button variant="danger" icon="xmark" onClick={() => setStatus(selectedSession, 'missed')}>Не ходил</Button>
-      </div>
-    </div>}
+              return <div className="item" key={session.id}>
+                <span
+                  className="lrow-i"
+                  style={{ '--tint': session.status === 'attended'
+                    ? 'var(--green)'
+                    : session.status === 'missed'
+                      ? 'var(--red)'
+                      : trainer.color || 'var(--purple)' }}
+                >
+                  <Icon name={session.status === 'attended' ? 'check' : session.status === 'missed' ? 'xmark' : 'calendar'} />
+                </span>
+                <div className="grow">
+                  <div className="tt">{fmtDate(session.date, true)}</div>
+                  <div className="ss">{subtitle}</div>
+                </div>
+                {session.status === 'planned' && session.date === todayISO() && (
+                  <Button size="sm" variant="tinted" onClick={() => trainerSessionStartSheet(session.id)}>Начать</Button>
+                )}
+                {canMark && session.date < todayISO() && <div className="row" style={{ gap: 4 }}>
+                  <button className="iconbtn" onClick={() => setStatus(session, 'attended')} aria-label="Ходил" style={{ color: 'var(--green)' }}><Icon name="check" /></button>
+                  <button className="iconbtn" onClick={() => setStatus(session, 'missed')} aria-label="Не ходил" style={{ color: 'var(--red)' }}><Icon name="xmark" /></button>
+                </div>}
+              </div>
+            })}
+        </div>}
   </>
 }
 
 export default function TrainerPlanner() {
-  const [planner, setPlanner] = usePlanner()
+  const nav = useNavigate()
+  const { planner, profileSchedule, blockedSoloDates, setPlanner } = usePlanningData()
+  const [tab, setTab] = useState('planning')
 
-  if (planner.confirmedTrainerId) {
-    return <div className="tp-root"><ActiveCourse planner={planner} setPlanner={setPlanner} /></div>
-  }
+  return <div className="narrow">
+    <div className="hdr">
+      <button className="iconbtn" onClick={() => nav('/plan')} aria-label="Назад"><Icon name="chevronLeft" /></button>
+      <div style={{ flex: 1, marginLeft: 10 }}>
+        <h1>С тренером</h1>
+        <div className="sub">Абонемент и расписание в общем плане OpenGym</div>
+      </div>
+    </div>
 
-  return <div className="tp-root">
-    <SubscriptionSetup planner={planner} setPlanner={setPlanner} />
-    <WorkScheduleEditor planner={planner} setPlanner={setPlanner} />
-    <TrainersEditor planner={planner} setPlanner={setPlanner} />
-    <CourseComparison planner={planner} setPlanner={setPlanner} />
+    <Segmented
+      value={tab}
+      onChange={setTab}
+      options={[
+        { value: 'planning', label: 'Планирование', icon: 'calendar' },
+        { value: 'trainers', label: 'Тренеры', icon: 'person' },
+      ]}
+    />
+
+    <div style={{ height: 16 }} />
+
+    {tab === 'planning'
+      ? <PlanningTab
+          planner={planner}
+          profileSchedule={profileSchedule}
+          blockedSoloDates={blockedSoloDates}
+          setPlanner={setPlanner}
+          onOpenTrainers={() => setTab('trainers')}
+        />
+      : <TrainersTab planner={planner} setPlanner={setPlanner} />}
   </div>
 }
