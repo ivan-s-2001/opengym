@@ -107,7 +107,11 @@ export default function Settings() {
         iconTint="var(--blue)"
         title="Мой график"
         subtitle="Рабочие смены и выходные, которые используются при планировании тренировок"
-        value={Object.keys(S.profileSchedule?.workShifts || S.trainerPlanner?.workShifts || {}).length ? 'Заполнен' : 'Не заполнен'}
+        value={!!(
+          Object.keys(S.profileSchedule?.workShifts || {}).length ||
+          Object.keys(S.profileSchedule?.weekly || {}).length ||
+          S.profileSchedule?.cycle
+        ) ? 'Заполнен' : 'Не заполнен'}
         accessory="chevron"
         onClick={() => nav('/settings/schedule')}
       />
