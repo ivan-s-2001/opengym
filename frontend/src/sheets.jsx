@@ -713,46 +713,182 @@ function WorkoutDetail({ w, close }) {
 export const workoutDetailSheet = w => ui().openSheet(close => <WorkoutDetail w={w} close={close} />)
 
 /* ============================ calendar ============================ */
+function TrainerSessionDetails({ sessionId, close }) {
+  const st = useStore(s => s.S)
+  const session = st.trainerPlanner?.sessions?.find(s => s.id === sessionId)
+  const trainer = st.trainerPlanner?.trainers?.find(t => t.id === session?.trainerId)
+  if (!session) return null
+
+  const status = session.status === 'attended' ? 'Посещено'
+    : session.status === 'missed' ? 'Пропущено'
+      : 'Запланировано'
+
+  return <>
+    <div className="row" style={{ gap: 10, marginBottom: 10 }}>
+      <span className="lrow-i" style={{ '--tint': trainer?.color || 'var(--purple)' }}><Icon name="person" /></span>
+      <div>
+        <h3 style={{ margin: 0 }}>{trainer?.name || 'Тренер'}</h3>
+        <div className="muted small">{fmtDate(session.date, true)} · {session.start}–{session.end}</div>
+      </div>
+    </div>
+    <div className="tag" style={{ marginBottom: 14 }}>{status}</div>
+
+    {session.status === 'planned' && session.date === todayISO() && (
+      <Button variant="primary" icon="play" onClick={() => { close(); trainerSessionStartSheet(session.id) }}>
+        Начать тренировку
+      </Button>
+    )}
+
+    {session.status === 'planned' && session.date !== todayISO() && (
+      <Button onClick={() => { close(); nav('/plan/trainer') }}>Открыть абонемент</Button>
+    )}
+  </>
+}
+
 function Calendar({ start, close }) {
   const st = useStore(s => s.S)
   const [cur, setCur] = useState(() => { const d = start ? new Date(start) : new Date(); d.setDate(1); return d })
   const y = cur.getFullYear(), mo = cur.getMonth()
   const byDay = {}
   st.workouts.forEach(w => (byDay[w.d] = byDay[w.d] || []).push(w))
+
+  const trainerSessions = st.trainerPlanner?.sessions || []
+  const trainerByDay = {}
+  trainerSessions.forEach(s => {
+    if (s.status === 'missed') return
+    trainerByDay[s.date] = s
+  })
+  const selectedTrainer = st.trainerPlanner?.trainers?.find(t => t.id === st.trainerPlanner?.confirmedTrainerId)
+  const trainerColor = selectedTrainer?.color || 'var(--purple)'
+
   const startOffset = (new Date(y, mo, 1).getDay() + 6) % 7
   const daysIn = new Date(y, mo + 1, 0).getDate()
-  const monthWs = st.workouts.filter(w => w.d.startsWith(y + '-' + String(mo + 1).padStart(2, '0')))
+  const prefix = y + '-' + String(mo + 1).padStart(2, '0')
+  const monthWs = st.workouts.filter(w => w.d.startsWith(prefix))
+  const monthTrainer = trainerSessions.filter(s => s.date.startsWith(prefix) && s.status !== 'missed')
   const monthVol = monthWs.reduce((a, w) => a + (w.vol || 0), 0)
   const monthMs = monthWs.reduce((a, w) => a + Math.max(0, (w.end || w.start) - w.start), 0)
   const cells = []
+
   for (let i = 0; i < startOffset; i++) cells.push(<div key={'e' + i} />)
+
   for (let d = 1; d <= daysIn; d++) {
-    const iso = y + '-' + String(mo + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0')
-    const ws = byDay[iso], effId = effectiveRoutineId(st, iso), ovr = st.dayPlan[iso] !== undefined
+    const iso = prefix + '-' + String(d).padStart(2, '0')
+    const ws = byDay[iso]
+    const trainerSession = trainerByDay[iso]
+    const effId = effectiveRoutineId(st, iso)
+    const ovr = st.dayPlan[iso] !== undefined
     const dotCls = ws ? 'done' : ovr && effId ? 'ovr' : effId ? 'plan' : ''
-    cells.push(<button key={d} className={'cal-d' + (ws ? ' has' : '') + (iso === todayISO() ? ' today' : '')} onClick={() => {
-      if (!ws) { close(); dayOverrideSheet(iso); return }
-      if (ws.length === 1) { close(); workoutDetailSheet(ws[0]); return }
-      close(); ui().openSheet(c2 => <><h3>{fmtDate(iso, true)}</h3><div className="list">{ws.map(w => <WorkoutRow key={w.id} w={w} onClick={() => { c2(); workoutDetailSheet(w) }} />)}</div></>)
-    }}><span>{d}</span><i className={dotCls} /></button>)
+    const trainerStyle = trainerSession && !ws
+      ? { background: `color-mix(in srgb,${trainerColor} 14%,var(--surface))`, color: trainerColor }
+      : undefined
+
+    cells.push(<button
+      key={d}
+      className={'cal-d' + (ws ? ' has' : '') + (iso === todayISO() ? ' today' : '')}
+      style={trainerStyle}
+      onClick={() => {
+        if (!ws && !trainerSession) { close(); dayOverrideSheet(iso); return }
+
+        if (ws?.length === 1 && !trainerSession) {
+          close()
+          workoutDetailSheet(ws[0])
+          return
+        }
+
+        if (!ws && trainerSession) {
+          close()
+          ui().openSheet(c2 => <TrainerSessionDetails sessionId={trainerSession.id} close={c2} />)
+          return
+        }
+
+        close()
+        ui().openSheet(c2 => <>
+          <h3>{fmtDate(iso, true)}</h3>
+          <div className="list">
+            {(ws || []).map(w => <WorkoutRow key={w.id} w={w} onClick={() => { c2(); workoutDetailSheet(w) }} />)}
+            {trainerSession && <div className="item" onClick={() => { c2(); ui().openSheet(c3 => <TrainerSessionDetails sessionId={trainerSession.id} close={c3} />) }}>
+              <span className="lrow-i" style={{ '--tint': trainerColor }}><Icon name="person" /></span>
+              <div className="grow">
+                <div className="tt">{selectedTrainer?.name || 'Тренер'}</div>
+                <div className="ss">{trainerSession.start}–{trainerSession.end} · {trainerSession.status === 'attended' ? 'посещено' : 'запланировано'}</div>
+              </div>
+              <Icon name="chevronRight" className="chev" />
+            </div>}
+          </div>
+        </>)
+      }}
+    >
+      <span>{d}</span>
+      <span className="row" style={{ gap: 3, minHeight: 5 }}>
+        <i className={dotCls} />
+        {trainerSession && <i style={{ background: trainerSession.status === 'attended' ? 'var(--green)' : trainerColor }} />}
+      </span>
+    </button>)
   }
+
   return <>
     <div className="row between" style={{ marginBottom: 2 }}>
       <button className="iconbtn" onClick={() => setCur(new Date(y, mo - 1, 1))} aria-label="Previous month"><Icon name="chevronLeft" /></button>
       <h3 style={{ margin: 0 }}>{t(MONTHS_LONG[mo])} {y}</h3>
       <button className="iconbtn" onClick={() => setCur(new Date(y, mo + 1, 1))} aria-label="Next month"><Icon name="chevronRight" /></button>
     </div>
-    <div className="small muted" style={{ textAlign: 'center' }}>{monthWs.length ? `${t(monthWs.length === 1 ? '{0} workout' : '{0} workouts', monthWs.length)} · ${fmtDur(monthMs)} · ${fmtVol(monthVol, st.unit)}` : t('No workouts this month')}</div>
+    <div className="small muted" style={{ textAlign: 'center' }}>
+      {monthWs.length || monthTrainer.length
+        ? `${t(monthWs.length === 1 ? '{0} workout' : '{0} workouts', monthWs.length)} · ${monthTrainer.length} с тренером${monthWs.length ? ' · ' + fmtDur(monthMs) + ' · ' + fmtVol(monthVol, st.unit) : ''}`
+        : t('No workouts this month')}
+    </div>
     <div className="cal-grid">{['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(l => <div key={l} className="cal-h">{t(l)}</div>)}{cells}</div>
     <div className="cal-legend">
       <span><i style={{ background: 'var(--acc)' }} />{t('Trained')}</span>
-      <span><i style={{ background: 'var(--label-3)' }} />{t('Planned')}</span>
-      <span><i style={{ background: 'var(--orange)' }} />{t('Rescheduled')}</span>
+      <span><i style={{ background: 'var(--label-3)' }} />Соло</span>
+      {selectedTrainer && <span><i style={{ background: trainerColor }} />{selectedTrainer.name || 'Тренер'}</span>}
     </div>
-    <div className="small dim" style={{ textAlign: 'center', marginTop: 10 }}>{t('Tap a trained day for details · tap any other day to plan a session')}</div>
+    <div className="small dim" style={{ textAlign: 'center', marginTop: 10 }}>Соло и занятия с тренером показаны в одном календаре.</div>
   </>
 }
 export const calendarSheet = start => ui().openSheet(close => <Calendar start={start} close={close} />)
+
+function TrainerStart({ sessionId, close }) {
+  const st = useStore(s => s.S)
+  const session = st.trainerPlanner?.sessions?.find(s => s.id === sessionId)
+  const trainer = st.trainerPlanner?.trainers?.find(t => t.id === session?.trainerId)
+
+  if (!session) return <div className="empty">Занятие не найдено.</div>
+
+  const start = routineId => {
+    close()
+    startFlow(routineId, {
+      source: 'trainer',
+      trainerId: trainer?.id || session.trainerId,
+      courseSessionId: session.id,
+      scheduledTime: session.start,
+    })
+  }
+
+  return <>
+    <div className="row" style={{ gap: 10, marginBottom: 14 }}>
+      <span className="lrow-i" style={{ '--tint': trainer?.color || 'var(--purple)' }}><Icon name="person" /></span>
+      <div>
+        <h3 style={{ margin: 0 }}>{trainer?.name || 'Тренер'}</h3>
+        <div className="muted small">Сегодня · {session.start}–{session.end}</div>
+      </div>
+    </div>
+
+    <h4 className="sec">Что тренируем?</h4>
+    <div className="list">
+      {st.routines.map(r => <div className="item" key={r.id} onClick={() => start(r.id)}>
+        <span className="lrow-i"><Icon name={glyphOf(r.emoji)} /></span>
+        <div className="grow"><div className="tt">{r.name}</div><div className="ss">{exCount(r.ex.length)}</div></div>
+        <Icon name="chevronRight" className="chev" />
+      </div>)}
+    </div>
+    <div style={{ height: 10 }} />
+    <Button icon="shuffle" onClick={() => start(null)}>Пустая тренировка · упражнения добавлю по ходу</Button>
+  </>
+}
+export const trainerSessionStartSheet = sessionId =>
+  ui().openSheet(close => <TrainerStart sessionId={sessionId} close={close} />)
 
 /* shared small workout row (used in lists) */
 export function WorkoutRow({ w, onClick }) {
@@ -768,10 +904,10 @@ export function WorkoutRow({ w, onClick }) {
 }
 
 /* ============================ workout lifecycle ============================ */
-export function startFlow(routineId) {
-  bwSheet({ required: true, onDone: bw => beginWorkout(routineId, bw) })
+export function startFlow(routineId, context = null) {
+  bwSheet({ required: true, onDone: bw => beginWorkout(routineId, bw, context) })
 }
-export function beginWorkout(routineId, bw) {
+export function beginWorkout(routineId, bw, context = null) {
   const st = S()
   const r = routineId ? st.routines.find(x => x.id === routineId) : null
   // The prescription is applied as the session is built, so you walk up to the bar with the
@@ -782,7 +918,17 @@ export function beginWorkout(routineId, bw) {
     return { id: cfg.id, sg: cfg.sg, target: { ...cfg }, plan, sets: applyPrescription(buildSets(st, cfg), plan) }
   })
   update(s => {
-    s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }
+    s.active = {
+      id: uid(),
+      d: todayISO(),
+      start: Date.now(),
+      routineId,
+      name: r ? r.name : t('Freestyle'),
+      bw: bw || null,
+      cur: 0,
+      entries,
+      ...(context || {}),
+    }
   })
   useUI.getState().stopRest()
   nav('/workout')
@@ -928,6 +1074,7 @@ function doFinishWorkout() {
   })
   const w = {
     id: A.id, d: A.d, start: A.start, end: Date.now(), routineId: A.routineId, name: A.name, bw: A.bw,
+    source: A.source || 'solo', trainerId: A.trainerId || null, courseSessionId: A.courseSessionId || null,
     // `target` (what the session prescribed) is kept alongside the sets: without it a
     // finished workout cannot say whether it hit its reps, and a timed session reads back
     // as "0 reps". It is what the progression engine works from.
@@ -941,6 +1088,13 @@ function doFinishWorkout() {
       if (mx > 0) { const cur = s.exWeights[e.id]; if (!cur || mx > cur.w) s.exWeights[e.id] = { w: mx, d: w.d } }
     })
     s.workouts.push(w)
+    if (A.courseSessionId && s.trainerPlanner?.sessions) {
+      const courseSession = s.trainerPlanner.sessions.find(x => x.id === A.courseSessionId)
+      if (courseSession) {
+        courseSession.status = 'attended'
+        courseSession.workoutId = w.id
+      }
+    }
     s.active = null
   })
   useUI.getState().stopRest()

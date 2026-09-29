@@ -101,6 +101,22 @@ export default function Settings() {
     </Section>
     {!user && !DEMO && !MOBILE && <p className="sect-f" style={{ marginTop: -18, marginBottom: 22 }}>{t('Guest mode — data lives only in this browser.')}</p>}
 
+    <Section title="Профиль">
+      <Row
+        icon="calendar"
+        iconTint="var(--blue)"
+        title="Мой график"
+        subtitle="Рабочие смены и выходные, которые используются при планировании тренировок"
+        value={!!(
+          Object.keys(S.profileSchedule?.workShifts || {}).length ||
+          Object.keys(S.profileSchedule?.weekly || {}).length ||
+          S.profileSchedule?.cycle
+        ) ? 'Заполнен' : 'Не заполнен'}
+        accessory="chevron"
+        onClick={() => nav('/settings/schedule')}
+      />
+    </Section>
+
     {/* ---------- general ---------- */}
     <Section title={t('General')} footer={t('Note: switching units only changes the label — logged numbers are not converted.')}>
       <SelectRow

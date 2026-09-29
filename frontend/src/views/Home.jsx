@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore.js'
 import { effectiveRoutine, effectiveRoutineId, streakWeeks, lastBW, setsDoneActive } from '../lib/history.js'
 import { fmtNum, fmtDate, todayISO, isoOf, weekKey, DAYS } from '../lib/format.js'
 import { t, dateLocale } from '../lib/i18n.js'
-import { bwSheet, goalSheet, dayOverrideSheet, calendarSheet, startFlow, loadStarterPlan, bwDeltaColor } from '../sheets.jsx'
+import { bwSheet, goalSheet, dayOverrideSheet, calendarSheet, startFlow, trainerSessionStartSheet, loadStarterPlan, bwDeltaColor } from '../sheets.jsx'
 import LineChart from '../components/LineChart.jsx'
 import Icon from '../components/Icon.jsx'
 import { Button } from '../components/ui.jsx'
@@ -51,6 +51,11 @@ export default function Home() {
   const today = new Date()
   const routine = effectiveRoutine(S, todayISO())
   const todayOvr = S.dayPlan[todayISO()] !== undefined
+  const todayTrainerSession = S.trainerPlanner?.sessions?.find(s => s.date === todayISO() && s.status === 'planned') || null
+  const todayTrainer = todayTrainerSession
+    ? S.trainerPlanner?.trainers?.find(t => t.id === todayTrainerSession.trainerId) || null
+    : null
+  const trainerActive = !!todayTrainerSession && S.active?.courseSessionId === todayTrainerSession.id
   const bw = lastBW(S)
   const prevBW = S.bodyweight.length > 1 ? S.bodyweight[S.bodyweight.length - 2] : null
   const delta = bw && prevBW ? bw.w - prevBW.w : null
@@ -75,6 +80,11 @@ export default function Home() {
 
   // today's session shown right under the week strip
   const onToday = () => { if (S.active) nav('/workout'); else if (routine) startFlow(routine.id); else dayOverrideSheet(todayISO()) }
+  const onTodayTrainer = () => {
+    if (!todayTrainerSession) return
+    if (trainerActive) nav('/workout')
+    else trainerSessionStartSheet(todayTrainerSession.id)
+  }
 
   return <div className="narrow">
     <div className="hdr">
@@ -103,6 +113,21 @@ export default function Home() {
           : routine ? <span className="tag acc">{t('Start')}</span>
           : <Icon name="plus" className="chev" />}
       </div>
+      {todayTrainerSession && <div className="today-row" onClick={onTodayTrainer}>
+        <div className="row" style={{ gap: 9, minWidth: 0 }}>
+          <span className="lrow-i" style={{ '--tint': todayTrainer?.color || 'var(--purple)' }}>
+            <Icon name={trainerActive ? 'timer' : 'person'} />
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div className="lbl2">С тренером · {todayTrainerSession.start}</div>
+            <div className="ttl">{todayTrainer?.name || 'Тренер'}</div>
+          </div>
+        </div>
+        <span className="tag" style={{
+          color: todayTrainer?.color || 'var(--purple)',
+          background: `color-mix(in srgb,${todayTrainer?.color || 'var(--purple)'} 15%,transparent)`,
+        }}>{trainerActive ? t('Resume') : t('Start')}</span>
+      </div>}
     </div>
 
     {coachOn && <CoachCard nav={nav} />}

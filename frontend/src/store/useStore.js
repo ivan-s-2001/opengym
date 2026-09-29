@@ -11,11 +11,19 @@ export const DEF = {
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
   bodyweight: [], routines: [], week: {}, dayPlan: {},
   exWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',
+  profileSchedule: { workShifts: {}, weekly: {}, cycle: null },
   // effort: which per-set effort scale is logged — 'none' | 'rir' | 'rpe'. null, not 'none', so
   // that a profile which never chose (loaded state is overlaid on DEF, on every path: local,
   // server pull, backup import) still falls back to the `showRir` boolean this replaced and
   // keeps the column it had. See effortOf.
   reminder: { on: false, time: '08:00', tz: null }, effort: null,
+  trainerPlanner: {
+    subscriptionSize: 0,
+    trainers: [],
+    confirmedTrainerId: null,
+    sessions: [],
+    settings: { workoutMinutes: 60, travelBeforeMinutes: 30, travelAfterMinutes: 30, stepMinutes: 15 }
+  },
   // AI Coach (issue: AI enablement). null until the profile opts in — a null namespace is the
   // same app it was before the feature existed, which is what Epic F asks for. Shape and
   // bounds live in lib/coach.js.
@@ -23,15 +31,57 @@ export const DEF = {
 }
 const clone = o => JSON.parse(JSON.stringify(o))
 
+function hydrateState(raw) {
+  const next = Object.assign(clone(DEF), raw || {})
+  next.profileSchedule = {
+    ...clone(DEF.profileSchedule),
+    ...(raw?.profileSchedule || {}),
+    workShifts: { ...(raw?.profileSchedule?.workShifts || {}) },
+    weekly: { ...(raw?.profileSchedule?.weekly || {}) },
+  }
+  next.trainerPlanner = {
+    ...clone(DEF.trainerPlanner),
+    ...(raw?.trainerPlanner || {}),
+    settings: {
+      ...clone(DEF.trainerPlanner.settings),
+      ...(raw?.trainerPlanner?.settings || {}),
+    },
+    trainers: raw?.trainerPlanner?.trainers || [],
+    sessions: raw?.trainerPlanner?.sessions || [],
+  }
+
+  // Migration from the first trainer-planner prototype: personal shifts used to
+  // live inside trainerPlanner. Profile schedule is now the only source of truth.
+  if (
+    !Object.keys(next.profileSchedule.workShifts).length &&
+    raw?.trainerPlanner?.workShifts &&
+    Object.keys(raw.trainerPlanner.workShifts).length
+  ) {
+    next.profileSchedule.workShifts = { ...raw.trainerPlanner.workShifts }
+  }
+  delete next.trainerPlanner.workShifts
+  return next
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(KEY)
-    if (raw) return Object.assign(clone(DEF), JSON.parse(raw))
+    if (raw) return hydrateState(JSON.parse(raw))
   } catch (e) { /* ignore */ }
   return clone(DEF)
 }
 
-const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
+const hasData = st => !!(
+  (st.workouts || []).length ||
+  (st.routines || []).length ||
+  (st.bodyweight || []).length ||
+  (st.trainerPlanner?.trainers || []).length ||
+  (st.trainerPlanner?.sessions || []).length ||
+  Number(st.trainerPlanner?.subscriptionSize || 0) > 0 ||
+  Object.keys(st.profileSchedule?.workShifts || {}).length ||
+  Object.keys(st.profileSchedule?.weekly || {}).length ||
+  !!st.profileSchedule?.cycle
+)
 
 export const useStore = create((set, get) => {
   let pushTm = null
@@ -122,7 +172,7 @@ export const useStore = create((set, get) => {
         const dirty = localStorage.getItem('gym_dirty') === '1'
         if (state && (!hasData(S) || ((state._ts || 0) >= (S._ts || 0) && !dirty))) {
           const active = S.active
-          const next = Object.assign(clone(DEF), state)
+          const next = hydrateState(state)
           if (active) next.active = active
           persist(next, false)
         } else if (hasData(S)) { await get().pushState() }
@@ -161,7 +211,7 @@ export const useStore = create((set, get) => {
         const saved = await nativeLoad()
         const S = get().S
         if (saved && (!hasData(S) || (saved._ts || 0) >= (S._ts || 0))) {
-          persist(Object.assign(clone(DEF), saved), false)
+          persist(hydrateState(saved), false)
         } else if (hasData(S)) {
           nativeSave(S)   // first run after an update from a file-less version: seed the mirror
         }
