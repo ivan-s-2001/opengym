@@ -1,12 +1,10 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { DAYN, uid, exCount } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
-import { dayAssignSheet, loadStarterPlan, planToolsSheet } from '../sheets.jsx'
+import { calendarSheet, dayAssignSheet, loadStarterPlan, planToolsSheet } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
-import { Button, Segmented } from '../components/ui.jsx'
-import TrainerPlanner from './TrainerPlanner.jsx'
+import { Button } from '../components/ui.jsx'
 import { glyphOf, DEFAULT_GLYPH } from '../lib/glyphs.js'
 import { coachAvailable } from '../lib/coach.js'
 import { DEMO } from '../lib/demo.js'
@@ -19,7 +17,6 @@ export default function Plan() {
   const config = useStore(s => s.config)
   const update = useStore(s => s.update)
   const coachOn = coachAvailable(config, user, { demo: DEMO, mobile: MOBILE })
-  const [planMode, setPlanMode] = useState('routine')
 
   const addRoutine = () => {
     const r = { id: uid(), name: t('New routine'), emoji: DEFAULT_GLYPH, ex: [] }
@@ -33,16 +30,30 @@ export default function Plan() {
       {coachOn && <button className="iconbtn" onClick={() => nav('/coach')} aria-label={t('Coach')} title={t('Coach')}><Icon name="sparkles" /></button>}
       <button className="iconbtn" onClick={planToolsSheet} aria-label={t('Share your plan')} title={t('Share your plan')}><Icon name="upload" /></button>
     </div>
-    <Segmented
-      className="plan-mode-seg"
-      value={planMode}
-      onChange={setPlanMode}
-      options={[
-        { value: 'routine', label: 'Программа', icon: 'clipboard' },
-        { value: 'trainer', label: 'С тренером', icon: 'person' },
-      ]}
-    />
-    {planMode === 'trainer' ? <TrainerPlanner /> : <div className="cols"><div>
+    <h4 className="sec">Расписание</h4>
+    <div className="list" style={{ marginBottom: 18 }}>
+      <div className="item" onClick={() => calendarSheet()}>
+        <span className="lrow-i" style={{ '--tint': 'var(--blue)' }}><Icon name="calendar" /></span>
+        <div className="grow">
+          <div className="tt">Общий график</div>
+          <div className="ss">Соло и занятия с тренером в одном календаре</div>
+        </div>
+        <Icon name="chevronRight" className="chev" />
+      </div>
+      <div className="item" onClick={() => nav('/plan/trainer')}>
+        <span className="lrow-i" style={{ '--tint': 'var(--purple)' }}><Icon name="person" /></span>
+        <div className="grow">
+          <div className="tt">С тренером</div>
+          <div className="ss">Абонемент, тренеры и подбор расписания</div>
+        </div>
+        {S.trainerPlanner?.confirmedTrainerId && <span className="tag acc">
+          {S.trainerPlanner.sessions?.filter(s => s.status === 'attended').length || 0}/{S.trainerPlanner.subscriptionSize || 0}
+        </span>}
+        <Icon name="chevronRight" className="chev" />
+      </div>
+    </div>
+
+    <div className="cols"><div>
       <h4 className="sec">{t('Week schedule')}</h4>
       <div className="list" style={{ display: 'flex', flexDirection: 'column' }}>
         {[1, 2, 3, 4, 5, 6, 0].map(d => {
@@ -65,6 +76,6 @@ export default function Plan() {
         <div className="empty"><div className="ico"><Icon name="clipboard" /></div>{t('No routines yet.')}<br />{t('Create one or load the starter plan.')}</div>
         <Button icon="sparkles" onClick={loadStarterPlan}>{t('Load starter plan (Push / Pull / Legs)')}</Button>
       </>}
-    </div></div>}
+    </div></div>
   </>
 }
