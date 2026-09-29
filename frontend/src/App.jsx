@@ -81,7 +81,8 @@ function Shell() {
               <Route path="/library" element={<Library />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/schedule" element={<ProfileSchedule />} />
-              <Route path="/trainer-planner" element={<TrainerPlanner />} />
+              <Route path="/plan/trainer" element={<TrainerPlanner />} />
+              <Route path="/trainer-planner" element={<Navigate to="/plan/trainer" replace />} />
               {/* The Coach screens gate themselves on the instance config; the routes exist
                   unconditionally so a deep link from a notification lands somewhere sane
                   rather than on the catch-all. */}
