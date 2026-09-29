@@ -9,7 +9,11 @@ const addDays = (iso, days) => {
 }
 
 const from = '2026-09-29'
-const workShifts = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [addDays(from, i), null]))
+const profileSchedule = {
+  workShifts: Object.fromEntries(Array.from({ length: 120 }, (_, i) => [addDays(from, i), null])),
+  weekly: {},
+  cycle: null,
+}
 const trainer = {
   id: 't1',
   name: 'Наташа',
@@ -18,7 +22,6 @@ const trainer = {
 }
 const planner = {
   subscriptionSize: 10,
-  workShifts,
   trainers: [trainer],
   confirmedTrainerId: null,
   sessions: [],
@@ -27,7 +30,7 @@ const planner = {
 
 describe('trainer subscription planner', () => {
   it('plans the requested subscription from the supplied current day forward', () => {
-    const course = buildTrainerCourse(planner, trainer, from)
+    const course = buildTrainerCourse(planner, profileSchedule, trainer, from)
     expect(course.complete).toBe(true)
     expect(course.sessions).toHaveLength(10)
     expect(course.sessions[0].date).toBe(from)
@@ -35,7 +38,7 @@ describe('trainer subscription planner', () => {
   })
 
   it('keeps at least one full rest day and no more than three sessions per ISO week', () => {
-    const course = buildTrainerCourse(planner, trainer, from)
+    const course = buildTrainerCourse(planner, profileSchedule, trainer, from)
     for (let i = 1; i < course.sessions.length; i++) {
       const a = new Date(course.sessions[i - 1].date + 'T12:00:00')
       const b = new Date(course.sessions[i].date + 'T12:00:00')
@@ -49,14 +52,18 @@ describe('trainer subscription planner', () => {
     expect(Math.max(...Object.values(byWeek))).toBeLessThanOrEqual(3)
   })
 
-  it('does not count a missed session and appends the next valid intersection', () => {
-    const confirmed = confirmTrainerCourse(planner, trainer.id, from)
-    const originalLast = confirmed.sessions.at(-1).date
+  it('does not count a missed session and refills the course with another valid intersection', () => {
+    const confirmed = confirmTrainerCourse(planner, profileSchedule, trainer.id, from)
     const missedId = confirmed.sessions[0].id
-    const next = markSession(confirmed, missedId, 'missed', from)
+    const next = markSession(confirmed, profileSchedule, missedId, 'missed', from)
 
     expect(next.sessions.filter(s => s.status === 'missed')).toHaveLength(1)
     expect(next.sessions.filter(s => s.status === 'planned' || s.status === 'attended')).toHaveLength(10)
-    expect(next.sessions.at(-1).date > originalLast).toBe(true)
+  })
+
+  it('does not schedule a trainer session on a solo-training date', () => {
+    const blocked = new Set([from])
+    const course = buildTrainerCourse(planner, profileSchedule, trainer, from, blocked)
+    expect(course.sessions[0].date).not.toBe(from)
   })
 })
