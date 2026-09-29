@@ -11,6 +11,7 @@ export const DEF = {
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
   bodyweight: [], routines: [], week: {}, dayPlan: {},
   exWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',
+  profileSchedule: { workShifts: {} },
   // effort: which per-set effort scale is logged — 'none' | 'rir' | 'rpe'. null, not 'none', so
   // that a profile which never chose (loaded state is overlaid on DEF, on every path: local,
   // server pull, backup import) still falls back to the `showRir` boolean this replaced and
@@ -39,7 +40,15 @@ function loadState() {
   return clone(DEF)
 }
 
-const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
+const hasData = st => !!(
+  (st.workouts || []).length ||
+  (st.routines || []).length ||
+  (st.bodyweight || []).length ||
+  (st.trainerPlanner?.trainers || []).length ||
+  (st.trainerPlanner?.sessions || []).length ||
+  Number(st.trainerPlanner?.subscriptionSize || 0) > 0 ||
+  Object.keys(st.profileSchedule?.workShifts || st.trainerPlanner?.workShifts || {}).length
+)
 
 export const useStore = create((set, get) => {
   let pushTm = null
