@@ -16,6 +16,14 @@ export const DEF = {
   // server pull, backup import) still falls back to the `showRir` boolean this replaced and
   // keeps the column it had. See effortOf.
   reminder: { on: false, time: '08:00', tz: null }, effort: null,
+  trainerPlanner: {
+    subscriptionSize: 0,
+    workShifts: {},
+    trainers: [],
+    confirmedTrainerId: null,
+    sessions: [],
+    settings: { workoutMinutes: 60, travelBeforeMinutes: 30, travelAfterMinutes: 30, stepMinutes: 15 }
+  },
   // AI Coach (issue: AI enablement). null until the profile opts in — a null namespace is the
   // same app it was before the feature existed, which is what Epic F asks for. Shape and
   // bounds live in lib/coach.js.
