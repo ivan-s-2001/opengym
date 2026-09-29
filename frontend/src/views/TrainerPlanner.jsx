@@ -332,7 +332,7 @@ function ActiveCourse({ planner, setPlanner }) {
     {view === 'calendar'
       ? <PlannerCalendar planner={planner} trainer={trainer} course={course} month={month} setMonth={setMonth} activeSessionId={selectedSession?.id} onSession={setSelectedSession} />
       : <div className="tp-session-list">
-        {planner.sessions.sort((a,b) => a.date.localeCompare(b.date)).map((s, i) => <div className={'card tp-session ' + s.status} key={s.id}>
+        {[...planner.sessions].sort((a,b) => a.date.localeCompare(b.date)).map((s, i) => <div className={'card tp-session ' + s.status} key={s.id}>
           <div className="tp-session-num">{s.status === 'attended' ? <Icon name="check" /> : s.status === 'missed' ? <Icon name="xmark" /> : i + 1}</div>
           <div className="grow"><strong>{fmtDate(s.date, true)}</strong><small>{s.start}–{s.end}</small></div>
           <span className={'tag ' + (s.status === 'attended' ? 'acc' : '')}>{s.status === 'attended' ? 'Был' : s.status === 'missed' ? 'Пропустил' : 'Запланировано'}</span>
