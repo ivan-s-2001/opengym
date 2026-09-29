@@ -23,6 +23,8 @@ import Stats from './views/Stats.jsx'
 import History from './views/History.jsx'
 import Library from './views/Library.jsx'
 import Settings from './views/Settings.jsx'
+import ProfileSchedule from './views/ProfileSchedule.jsx'
+import TrainerPlanner from './views/TrainerPlanner.jsx'
 import Admin from './views/Admin.jsx'
 import Coach from './views/Coach.jsx'
 import CoachIntake from './views/CoachIntake.jsx'
@@ -78,6 +80,8 @@ function Shell() {
               <Route path="/history" element={<History />} />
               <Route path="/library" element={<Library />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/schedule" element={<ProfileSchedule />} />
+              <Route path="/trainer-planner" element={<TrainerPlanner />} />
               {/* The Coach screens gate themselves on the instance config; the routes exist
                   unconditionally so a deep link from a notification lands somewhere sane
                   rather than on the catch-all. */}
